@@ -102,15 +102,15 @@ public class ChartPatternManager {
             List<PatternDrawingModel.CanvasPoint> translatedPoints = new ArrayList<>();
             
             for (ChartPattern.Point pt : pattern.getPoints()) {
-                // X-Axis mapping: Physical X = (I * C_w) + (C_w / 2) - O_x
-                int absoluteIndex = absoluteStartIndex + pt.getIndex();
-                float physicalX = (absoluteIndex * candleWidth) + (candleWidth / 2f) - offsetX;
+                // Resolved index based on unique timestamp (Temporal Stabilization)
+                int resolvedIndex = getIndexByTimestamp(candles, pt.getTimestamp(), pt.getIndex(), absoluteStartIndex);
+                float physicalX = (resolvedIndex * candleWidth) + (candleWidth / 2f) - offsetX;
 
                 // Y-Axis mapping: Physical Y = H - (R * H)
                 double relativePrice = (pt.getPrice() - minPrice) / (maxPrice - minPrice);
                 float physicalY = (float) (canvasHeight - (relativePrice * canvasHeight));
 
-                translatedPoints.add(new PatternDrawingModel.CanvasPoint(physicalX, physicalY));
+                translatedPoints.add(new PatternDrawingModel.CanvasPoint(physicalX, physicalY, pt.getTimestamp()));
             }
 
             // Map target level line Y coordinate
@@ -131,20 +131,26 @@ public class ChartPatternManager {
             List<PatternDrawingModel.CanvasPoint> translatedNeckline = new ArrayList<>();
             if (pattern.getNecklinePoints() != null) {
                 for (ChartPattern.Point pt : pattern.getNecklinePoints()) {
-                    int absoluteIndex = absoluteStartIndex + pt.getIndex();
-                    float physicalX = (absoluteIndex * candleWidth) + (candleWidth / 2f) - offsetX;
+                    int resolvedIndex = getIndexByTimestamp(candles, pt.getTimestamp(), pt.getIndex(), absoluteStartIndex);
+                    float physicalX = (resolvedIndex * candleWidth) + (candleWidth / 2f) - offsetX;
                     double relativePrice = (pt.getPrice() - minPrice) / (maxPrice - minPrice);
                     float physicalY = (float) (canvasHeight - (relativePrice * canvasHeight));
-                    translatedNeckline.add(new PatternDrawingModel.CanvasPoint(physicalX, physicalY));
+                    translatedNeckline.add(new PatternDrawingModel.CanvasPoint(physicalX, physicalY, pt.getTimestamp()));
                 }
             }
 
             // Map Breakout Point if confirmed
             float breakoutX = -1;
             float breakoutY = -1;
-            if (pattern.getBreakoutIndex() >= 0) {
-                int absoluteIndex = absoluteStartIndex + pattern.getBreakoutIndex();
-                breakoutX = (absoluteIndex * candleWidth) + (candleWidth / 2f) - offsetX;
+            int resolvedBreakoutIndex = -1;
+            if (pattern.getBreakoutTimestamp() > 0) {
+                resolvedBreakoutIndex = getIndexByTimestamp(candles, pattern.getBreakoutTimestamp(), pattern.getBreakoutIndex(), absoluteStartIndex);
+            } else if (pattern.getBreakoutIndex() >= 0) {
+                resolvedBreakoutIndex = absoluteStartIndex + pattern.getBreakoutIndex();
+            }
+
+            if (resolvedBreakoutIndex >= 0 && resolvedBreakoutIndex < candles.size()) {
+                breakoutX = (resolvedBreakoutIndex * candleWidth) + (candleWidth / 2f) - offsetX;
                 double relativePrice = (pattern.getBreakoutPrice() - minPrice) / (maxPrice - minPrice);
                 breakoutY = (float) (canvasHeight - (relativePrice * canvasHeight));
             }
@@ -202,6 +208,20 @@ public class ChartPatternManager {
         activity.runOnUiThread(() -> {
             chartView.setPatterns(translatedPatterns);
         });
+    }
+
+    /**
+     * Helper to lookup exact candlestick index by unique timestamp (Temporal Stabilization)
+     */
+    private static int getIndexByTimestamp(List<Candlestick> candles, long timestamp, int fallbackIndex, int absoluteStartIndex) {
+        if (timestamp > 0) {
+            for (int i = 0; i < candles.size(); i++) {
+                if (candles.get(i).timestamp == timestamp) {
+                    return i;
+                }
+            }
+        }
+        return absoluteStartIndex + fallbackIndex; // Fallback to original relative calculation
     }
 
     /**
